@@ -10,6 +10,7 @@ import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -26,11 +27,13 @@ public enum HittaCallerVersion {
     private final static String encoding = "UTF-8";
     private final String url;
 
+    private final static int TRY_COUNT = 5;
+
     HittaCallerVersion(String url) {
         this.url = url;
     }
 
-    public Result personCompanySearch(String callerId, String key, PersonCompanySearch type, String what, String where, String geoSystem, int pageNumber, int pageSize, int rangeFrom, int rangeTo) throws IOException {
+    public Result personCompanySearch(String callerId, String key, PersonCompanySearch type, String what, String where, String geoSystem, int pageNumber, int pageSize, int rangeFrom, int rangeTo, Logger logger) throws IOException {
 
         switch (this) {
             case V1:
@@ -66,7 +69,7 @@ public enum HittaCallerVersion {
                     parameters.append("&geo.system=" + geoSystem);
                 }
 
-                return authenticatedGetCallV1(callerId, key, parameters.toString());
+                return authenticatedGetCallV1(callerId, key, parameters.toString(),TRY_COUNT,logger);
 
             default:
                 throw new RuntimeException("Not implemented");
@@ -74,25 +77,33 @@ public enum HittaCallerVersion {
     }
 
 
-    private Result authenticatedGetCallV1(String callerId, String key, String parameters) throws IOException {
-        HttpClient client = HttpClientBuilder.create().build();
-        HttpGet request = new HttpGet(url + parameters);
+    private Result authenticatedGetCallV1(String callerId, String key, String parameters,int tryCount,Logger logger) throws IOException {
+        try{
+            HttpClient client = HttpClientBuilder.create().build();
+            HttpGet request = new HttpGet(url + parameters);
+            String randomString = RandomStringUtils.randomAscii(16);
+            String timeStamp = Long.toString(Instant.now().getEpochSecond());
 
-        String randomString = RandomStringUtils.randomAscii(16);
-        String timeStamp = Long.toString(Instant.now().getEpochSecond());
+            request.addHeader("X-Hitta-CallerId", callerId);
+            request.addHeader("X-Hitta-Time", timeStamp);
+            request.addHeader("X-Hitta-Random", randomString);
+            request.addHeader("X-Hitta-Hash", DigestUtils.sha1Hex(callerId + timeStamp + key + randomString));
+            HttpResponse response = client.execute(request);
+            String jsonString = IOUtils.toString(response.getEntity().getContent(), encoding);
+            JsonObject json = new JsonParser().parse(jsonString).getAsJsonObject();
 
-        request.addHeader("X-Hitta-CallerId", callerId);
-        request.addHeader("X-Hitta-Time", timeStamp);
-        request.addHeader("X-Hitta-Random", randomString);
-        request.addHeader("X-Hitta-Hash", DigestUtils.sha1Hex(callerId + timeStamp + key + randomString));
-        HttpResponse response = client.execute(request);
+            return new Result(json);
 
-
-        String jsonString = IOUtils.toString(response.getEntity().getContent(), encoding);
-        JsonObject json = new JsonParser().parse(jsonString).getAsJsonObject();
-
-        return new Result(json);
-
+        }catch (Exception ex){
+            if(logger != null){
+                logger.error("try nr:" + tryCount + " with message - " + ex.getMessage());
+            }
+            tryCount--;
+            if(tryCount > 0){
+                 return authenticatedGetCallV1(callerId,key,parameters,tryCount,logger);
+            }
+        }
+        throw new RuntimeException("Could not receive information from hitta with parameters - " + parameters);
     }
 
 }
