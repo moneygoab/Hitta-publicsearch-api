@@ -41,8 +41,6 @@ public enum HittaCallerVersion {
 
                 if (!what.isEmpty()) {
                     parameters.append("what=" + URLEncoder.encode(what, encoding));
-                } else {
-                    throw new RuntimeException("What parameter is required for call!");
                 }
 
                 if (!where.isEmpty()) {
